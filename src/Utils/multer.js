@@ -19,10 +19,6 @@ module.exports = {
       });
     },
   }),
-  limits: {
-    // 5 MB max size
-    fileSize: 5 * 1024 * 1024,
-  },
   fileFilter: (req, file, cb) => {
     const allowedFormat = [
       'application/pdf',

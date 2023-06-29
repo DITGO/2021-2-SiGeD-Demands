@@ -9,6 +9,7 @@ const { getClients } = require('../Services/Axios/clientService');
 const { getUser } = require('../Services/Axios/userService');
 const { verifyChanges } = require('../Utils/verifyChanges');
 const File = require('../Models/FileSchema');
+const {clearQueryParams} = require('../Utils/clear');
 
 /* const {
   notifyDemandCreated,
@@ -18,7 +19,9 @@ const File = require('../Models/FileSchema');
 const demandGetWithClientsNames = async (req, res) => {
   try {
     const token = req.headers['x-access-token'];
-    const { open } = req.query;
+
+    clearQueryParams(req.query);
+
     const demandsWithClients = [];
     let demands;
     const clients = await getClients(token);
@@ -26,19 +29,8 @@ const demandGetWithClientsNames = async (req, res) => {
     if (clients.error) {
       return res.status(400).json({ err: clients.error });
     }
-    
-    if (open === 'false') {
-      demands = await Demand.find({ open }).populate('categoryID');
-    } else if (open === 'null') {
-      demands = await Demand.find({
-        $or: [
-          { open: false },
-          { open: true },
-        ],
-      }).populate('categoryID');
-    } else {
-      demands = await Demand.find({ open: true }).populate('categoryID');
-    }
+
+    demands = await Demand.find(req.query).populate('categoryID').sort({ 'createdAt': -1, 'sectorHistory.createdAt': 1 });
 
     clients.map((client) => {
       demands.map((demand) => {
@@ -426,7 +418,6 @@ const demandsSectorsStatistic = async (req, res) => {
 
   try {
     const statistics = await Demand.aggregate(aggregatorOpts).exec();
-    console.log(statistics);
     return res.json(statistics);
   } catch (err) {
     return res.status(400).json({ err: 'failed to generate statistics' });
@@ -441,6 +432,7 @@ const demandCreate = async (req, res) => {
       process,
       categoryID,
       sectorID,
+      responsibleUserName,
       clientID,
       userID,
       demandDate,
@@ -464,9 +456,8 @@ const demandCreate = async (req, res) => {
     if (user.error) {
       return res.status(400).json({ message: user.error });
     }
-    const date = moment
-      .utc(moment.tz('America/Sao_Paulo').format('YYYY-MM-DDTHH:mm:ss'))
-      .toDate();
+    const date = moment.utc(moment.tz('America/Sao_Paulo').format('YYYY-MM-DDTHH:mm:ss')).toDate();
+
     const retroactiveDate = moment(demandDate).toDate();
     retroactiveDate.setHours(
       date.getHours(),
@@ -483,6 +474,7 @@ const demandCreate = async (req, res) => {
         sectorID,
         createdAt: date,
         updatedAt: date,
+        responsibleUserName,
       },
       clientID,
       userID,
@@ -497,7 +489,6 @@ const demandCreate = async (req, res) => {
 
     // await notifyDemandCreated(clientID, newDemand, token);
     // await scheduleDemandComingAlert(clientID, newDemand, token);
-
     return res.json(newDemand);
   } catch (err) {
     console.log(err);
@@ -646,7 +637,7 @@ const updateSectorDemand = async (req, res) => {
 const forwardDemand = async (req, res) => {
   const { id } = req.params;
 
-  const { sectorID } = req.body;
+  const { sectorID, responsibleUserName } = req.body;
 
   const validField = validation.validateSectorID(sectorID);
 
@@ -665,6 +656,7 @@ const forwardDemand = async (req, res) => {
       updatedAt: moment
         .utc(moment.tz('America/Sao_Paulo').format('YYYY-MM-DDTHH:mm:ss'))
         .toDate(),
+      responsibleUserName,
     });
 
     const updateStatus = await Demand.findOneAndUpdate(
@@ -885,15 +877,17 @@ const getFile = async (req, res) => {
 
 const uploadFile = async (req, res) => {
   try {
+
     const { id } = req.params;
     const {
       userName,
       userSector,
-      userId,
+      userID,
       description,
       important,
       visibility,
     } = req.body;
+
     const name = req.file.originalname;
     const { size } = req.file;
     const path = req.file.filename;
@@ -907,8 +901,13 @@ const uploadFile = async (req, res) => {
     });
 
     const validFields = validation.validateDemandUpdate(
-      userName, description, visibility, userSector, userId, important,
+      userName, description, visibility, userSector, userID, important,
     );
+    
+    const MAX_SIZE_5_MEGABYTES = 5 * 1024 * 1024;
+    if (size >= MAX_SIZE_5_MEGABYTES) {
+      return res.status(400).json({ err: "File bigger then 5MB." })
+    }
 
     if (validFields.length) {
       return res.status(400).json({ status: validFields });
@@ -919,7 +918,7 @@ const uploadFile = async (req, res) => {
     demandFound.updateList = demandFound.updateList.push({
       userName,
       userSector,
-      userId,
+      userID,
       fileID: newFile._id,
       description,
       visibility,
