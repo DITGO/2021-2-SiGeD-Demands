@@ -51,7 +51,7 @@ const demandGetWithClientsNames = async (req, res) => {
             updateList: demand.updateList,
           };
           demandsWithClients.push(demandWithClient);
-          console.log(demandsWithClients);
+          //console.log(demandsWithClients);
           return true;
         }
         return false;
